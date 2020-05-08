@@ -13,3 +13,6 @@ https://www.cis.upenn.edu/~cis610/ruppert.pdf
 
 •	Delaunay Refinement Algorithms for Triangular Mesh Generation Jonathan Richard Shewchuk jrs@cs.berkeley.edu (May 21, 2001)<br />
 https://people.eecs.berkeley.edu/~jrs/papers/2dj.pdf
+
+•	Guranteed-Quality Mesh Generation for curved surfaces L.Paul Chew Cornell University Ithaca, NY<br />
+https://kogs-www.informatik.uni-hamburg.de/~tchernia/SR_papers/chew93.pdf
