@@ -8,7 +8,7 @@ namespace constrained_delaunay_triangulation
 {
     public static class constrained_delaunay_algorithm
     {
-        // A Delaunay Renement Algorithm for Quality 2-Dimensional Mesh Generation
+        // A Delaunay Refinement Algorithm for Quality 2-Dimensional Mesh Generation
         // Jim Ruppert (NASA Ames Research Center)
         // https://www.cis.upenn.edu/~cis610/ruppert.pdf
         // Delaunay Refinement Algorithms for Triangular Mesh Generation
@@ -80,20 +80,33 @@ namespace constrained_delaunay_triangulation
             main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
             // ________________________________________________________________________________________________________________________________
 
-            // step : 5 Refine the mesh with circum radius to shortest edge ratio
             do
             {
-                for (int i = 0; i < main_mesh.local_output_triangle.Count; i++)
+                // step: 5 Grade the triangle with circum radius to shortest edge ratio and find the worst triangle
+                List<pslg_datastructure.triangle2d> graded_triangle = main_mesh.local_output_triangle.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ToList();
+                pslg_datastructure.triangle2d worst_triangle = graded_triangle[graded_triangle.Count - 1];
+
+                // step : 6 Refine the mesh with circum radius to shortest edge ratio
+                if (worst_triangle.circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
                 {
-                    // Refinement operation 1 => split a segment by adding a vertex at its midpoint
-                    pslg_datastructure.point2d inner_surface_pt;
-                    if (main_mesh.local_output_triangle[i].circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
+                    pslg_datastructure.point2d inner_surface_pt = worst_triangle.circum_center;
+                    // step : 6A Refine the outter edges which are encroched by the failed triangles circum center
+                    is_encroched = false;
+                    encroched_segment_single_divide(ref outter_edges, ref inner_surface_pt, ref is_encroched, ref seed_outter_edge_exists);
+
+                    if (is_encroched == true)
                     {
-                        // step : 5A Refine the outter edges which are encroched by the failed triangles circum center
+                        // incremental add point
+                        main_mesh.Add_single_point(inner_surface_pt);
+                        goto loopend;
+                    }
+
+                    // step : 6B Refine all the inner edges which are encroched by the failed triangles circum center
+                    for (int j = 0; j < inner_surface_indices.Count; j++)
+                    {
+                        // cycle through all the inner surfaces
                         is_encroched = false;
-                        inner_surface_pt = main_mesh.local_output_triangle[i].circum_center;
-                        // seed_outter_edge_exists = false;
-                        encroched_segment_single_divide(ref outter_edges, ref inner_surface_pt, ref is_encroched, ref seed_outter_edge_exists);
+                        encroched_segment_single_divide(ref inner_edges[j], ref inner_surface_pt, ref is_encroched, ref seed_inner_edge_exists[j]);
 
                         if (is_encroched == true)
                         {
@@ -101,68 +114,39 @@ namespace constrained_delaunay_triangulation
                             main_mesh.Add_single_point(inner_surface_pt);
                             goto loopend;
                         }
-
-                        // step : 5B Refine all the inner edges which are encroched by the failed triangles circum center
-                        for (int j = 0; j < inner_surface_indices.Count; j++)
-                        {
-                            // cycle through all the inner surfaces
-                            is_encroched = false;
-                            inner_surface_pt = main_mesh.local_output_triangle[i].circum_center;
-                            // seed_inner_edge_exists[j] = false;
-                            encroched_segment_single_divide(ref inner_edges[j], ref inner_surface_pt, ref is_encroched, ref seed_inner_edge_exists[j]);
-
-                            if (is_encroched == true)
-                            {
-                                // incremental add point
-                                main_mesh.Add_single_point(inner_surface_pt);
-                                goto loopend;
-                            }
-                        }
-
-                    loopend:;
                     }
-                }
 
-                // Refinement operation 2 => split a triangle by adding a vertex at its circum center
-                // step : 5C Refine all the inner surface with the failed triangles circum center
-                if (is_encroched == false)
+                    // Refinement operation 2 => split a triangle by adding a vertex at its circum center
+                    // step : 6C Refine all the inner surface with the failed triangles circum center
+                    main_mesh.Add_single_point(inner_surface_pt);
+
+                loopend:;
+                    // Finalize the mesh (to remove the faces out of bounds)
+                    main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
+                }
+                else
                 {
-                    // start refining inner surface only after there is no enrochment
-                    is_triangleskinny = false;
-                    for (int i = 0; i < main_mesh.local_output_triangle.Count; i++)
-                    {
-                        pslg_datastructure.point2d inner_surface_pt;
-                        if (main_mesh.local_output_triangle[i].circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
-                        {
-                            is_triangleskinny = true;
-                            inner_surface_pt = main_mesh.local_output_triangle[i].circum_center;
-                            // incremental add point
-                            main_mesh.Add_single_point(inner_surface_pt);
-                            break;
-                        }
-                    }
+                    break;
                 }
 
-                // Finalize the mesh
-                main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
+            } while (true);
+            // ________________________________________________________________________________________________________________________________
 
-            } while (is_encroched == true || is_triangleskinny == true);
-
-
-            // step : 6 Add the mesh to the surface
+            // step : 7 Add the mesh to the surface
             the_surface_data[the_surface_index].my_mesh = new pslg_datastructure.mesh2d();
             the_surface_data[the_surface_index].is_meshed = true;
             the_surface_data[the_surface_index].my_mesh = new pslg_datastructure.mesh2d(main_mesh.local_input_points, main_mesh.local_output_edges, main_mesh.local_output_triangle);
+            // ________________________________________________________________________________________________________________________________
 
-            // step : 7 set the mesh seeds to the surface edges
-            // step : 7A set the mesh seeds to the outter surface edges
+            // step : 8 set the mesh seeds to the surface edges
+            // step : 8A set the mesh seeds to the outter surface edges
             if (seed_outter_edge_exists == false)
             {
                 the_surface_data[the_surface_index].encapsulating_seed_edges = new List<pslg_datastructure.edge2d>();
                 the_surface_data[the_surface_index].encapsulating_seed_edges.AddRange(outter_edges);
             }
 
-            // step : 7B set the mesh seeds to the inner surface edges
+            // step : 8B set the mesh seeds to the inner surface edges
             for (int i = 0; i < inner_surface_indices.Count; i++) // cycle through all the inner surfaces
             {
                 if (seed_inner_edge_exists[i] == false)
@@ -171,6 +155,8 @@ namespace constrained_delaunay_triangulation
                     the_surface_data[inner_surface_indices[i]].encapsulating_seed_edges.AddRange(inner_edges[i]);
                 }
             }
+            // ________________________________________________________________________________________________________________________________
+            // End
         }
 
         public static List<pslg_datastructure.edge2d> set_surface_edges(pslg_datastructure.surface_store the_surface, ref bool seed_control)
