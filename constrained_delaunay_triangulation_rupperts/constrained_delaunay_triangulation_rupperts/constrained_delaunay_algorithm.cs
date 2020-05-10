@@ -14,6 +14,23 @@ namespace constrained_delaunay_triangulation
         // Delaunay Refinement Algorithms for Triangular Mesh Generation
         // Jonathan Richard Shewchuk jrs@cs.berkeley.edu (May 21, 2001)
         // https://people.eecs.berkeley.edu/~jrs/papers/2dj.pdf
+        // Guranteed-Quality Mesh Generation for curved surfaces L.Paul Chew Cornell University Ithaca, NY
+        // https://kogs-www.informatik.uni-hamburg.de/~tchernia/SR_papers/chew93.pdf
+        // https://ecommons.cornell.edu/handle/1813/6899
+
+        // There Are Planar Graphs Almost as Good as the Complete Graph L.PAUL CHEW
+        // https://core.ac.uk/download/pdf/82457584.pdf
+
+
+        // Q- Morph Algorithm References
+        // ] Steven J. Owen, Matthew L. Staten, Scott A. Canann, and Sunil Saigal.
+        // Advancing Front Quadrilateral Meshing Using Triangle Transformations.In Proceedings of the 7th International Meshing Roundtable.October 1998.
+        // http://www.imr.sandia.gov/papers/imr7/owen98.ps.gz
+        // https://www.researchgate.net/profile/Steven_Owen3/publication/221561698_Advancing_Front_Quadrilateral_Meshing_Using_Triangle_Transformations/links/0046352cee8df0718b000000/Advancing-Front-Quadrilateral-Meshing-Using-Triangle-Transformations.pdf
+        // https://pdfs.semanticscholar.org/6984/9f35237f416811e23a776167da7a6aabaeab.pdf
+        // http://pages.cs.wisc.edu/~csverma/CS899_09/qmorph.pdf
+
+
 
         public static double eps = 0.000001; // 10^-6
         private static mesh_store main_mesh;
@@ -54,7 +71,6 @@ namespace constrained_delaunay_triangulation
             // ________________________________________________________________________________________________________________________________
 
             bool is_encroched = false;
-            bool is_triangleskinny = false;
             do
             {
                 // step : 3 Encroched subsegment (Encroached subsegments are given priority over skinny triangles)
@@ -80,16 +96,21 @@ namespace constrained_delaunay_triangulation
             main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
             // ________________________________________________________________________________________________________________________________
 
+            // step : xx Well sized triangle condition is mean d
+            List<pslg_datastructure.triangle2d> temp_sized_triangle = main_mesh.local_output_triangle.OrderBy(obj => obj.circum_radius).ToList();
+            double mean_size = temp_sized_triangle[0].circum_radius * 20;
+
+
             do
             {
                 // step: 5 Grade the triangle with circum radius to shortest edge ratio and find the worst triangle
-                List<pslg_datastructure.triangle2d> graded_triangle = main_mesh.local_output_triangle.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ToList();
-                pslg_datastructure.triangle2d worst_triangle = graded_triangle[graded_triangle.Count - 1];
+                mesh_store.triangle_store worst_triangle = get_worst_triangle(main_mesh.all_triangles, the_surface_data[the_surface_index], outter_edges, inner_edges);
 
                 // step : 6 Refine the mesh with circum radius to shortest edge ratio
-                if (worst_triangle.circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
+                // and To produce an-edge of length less than h, the radius of circumcircle must be less than h.
+                if (worst_triangle != null && (worst_triangle.circumradius_shortest_edge_ratio > Form1.the_static_class.B_var || worst_triangle.circum_radius > mean_size))
                 {
-                    pslg_datastructure.point2d inner_surface_pt = worst_triangle.circum_center;
+                    pslg_datastructure.point2d inner_surface_pt = new pslg_datastructure.point2d(-1, worst_triangle.circum_center.x, worst_triangle.circum_center.y);
                     // step : 6A Refine the outter edges which are encroched by the failed triangles circum center
                     is_encroched = false;
                     encroched_segment_single_divide(ref outter_edges, ref inner_surface_pt, ref is_encroched, ref seed_outter_edge_exists);
@@ -122,14 +143,20 @@ namespace constrained_delaunay_triangulation
 
                 loopend:;
                     // Finalize the mesh (to remove the faces out of bounds)
-                    main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
+                    // main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
+
                 }
                 else
                 {
+                    // Exit if no bad triangles
                     break;
                 }
 
             } while (true);
+
+            // Finalize the mesh (to remove the faces out of bounds)
+            main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
+
             // ________________________________________________________________________________________________________________________________
 
             // step : 7 Add the mesh to the surface
@@ -255,6 +282,62 @@ namespace constrained_delaunay_triangulation
                     }
                 }
             }
+        }
+
+        public static mesh_store.triangle_store get_worst_triangle(List<mesh_store.triangle_store> all_triangles, pslg_datastructure.surface_store the_surface, List<pslg_datastructure.edge2d> outter_edges, List<pslg_datastructure.edge2d>[] inner_edges)
+        {
+            // get the worst triangle
+            // condition is the circume center must lies inside the surface or inside the diametrical circle
+
+            List<mesh_store.triangle_store> graded_triangle = all_triangles.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ThenBy(obj => obj.circum_radius).ToList();
+            mesh_store.triangle_store worst_triangle = null;
+
+            // step: 5B select the worst triangle by thether the triangle's circum center lies inside the surface 
+            for (int i = graded_triangle.Count - 1; i >= 0; i--)
+            {
+                if (is_point_encroched(outter_edges, new pslg_datastructure.point2d(-1, graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y)) == true)
+                {
+                    worst_triangle = graded_triangle[i];
+                    goto loopend;
+                }
+                else if (the_surface.pointinsurface(graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y) == true)
+                {
+                    worst_triangle = graded_triangle[i];
+                    goto loopend;
+                }
+                else
+                {
+                    for (int j = 0; j < inner_edges.Length; j++)
+                    {
+                        if (is_point_encroched(inner_edges[j], new pslg_datastructure.point2d(-1, graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y)) == true)
+                        {
+                            worst_triangle = graded_triangle[i];
+                            goto loopend;
+                        }
+                    }
+                }
+            }
+        loopend:;
+            return worst_triangle;
+        }
+
+        public static bool is_point_encroched(List<pslg_datastructure.edge2d> surface_edges, pslg_datastructure.point2d circumcenter_pt)
+        {
+            for (int i = surface_edges.Count - 1; i >= 0; i--) // go reverse to avoid overflow error
+            {
+                // Form a diametral circle
+                pslg_datastructure.point2d cicle_center = new pslg_datastructure.point2d(-1, surface_edges[i].mid_pt.x, surface_edges[i].mid_pt.y); // circle center
+                double circle_radius_squared = Math.Pow((surface_edges[i].edge_length * 0.5) - eps, 2);
+
+
+                // (x - center_x)^2 + (y - center_y)^2 < radius^2 (then the point is inside the circle)
+                if ((Math.Pow((circumcenter_pt.x - cicle_center.x), 2) + Math.Pow((circumcenter_pt.y - cicle_center.y), 2)) < circle_radius_squared)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public static void delete_constrained_mesh(int the_surface_index, List<int> inner_surface_indices, ref List<pslg_datastructure.surface_store> the_surface_data)
@@ -1027,6 +1110,11 @@ namespace constrained_delaunay_triangulation
                 public point_store circum_center
                 {
                     get { return this._circum_center; }
+                }
+
+                public double circum_radius
+                {
+                    get { return this._circum_circle_radius; }
                 }
 
                 public double circumradius_shortest_edge_ratio
