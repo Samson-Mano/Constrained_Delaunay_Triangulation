@@ -1069,47 +1069,7 @@ namespace constrained_delaunay_triangulation
                 // Super triangle creation complete
                 //_________________________________________________________________________________
             }
-
-            //public List<triangle_store> get_graded_triangles(pslg_datastructure.surface_store the_surface)
-            //{
-            //    List<triangle_store> graded_triangles = new List<triangle_store>();
-
-            //    foreach (triangle_store tri in all_triangles)
-            //    {
-            //        if (tri.contains_point(s_p1) == false && tri.contains_point(s_p2) == false && tri.contains_point(s_p3) == false)
-            //        {
-            //            if (is_triangle_in_surface(tri, the_surface) == true)
-            //            {
-            //                graded_triangles.Add(tri);
-            //            }
-            //        }
-            //    }
-
-            //    // Order the triangles
-            //    graded_triangles = graded_triangles.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ToList();
-
-            //    return graded_triangles;
-            //}
-
-            //private bool is_triangle_in_surface(triangle_store tri, pslg_datastructure.surface_store the_surface)
-            //{
-            //    double shrink_factor = 0.98;
-            //    point_store[] pts = new point_store[3];
-
-            //    pts[0] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt1.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt1.y * shrink_factor), null);
-            //    pts[1] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt2.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt2.y * shrink_factor), null);
-            //    pts[2] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt3.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt3.y * shrink_factor), null);
-
-            //    if (the_surface.pointinsurface(pts[0].x, pts[0].y) == true && the_surface.pointinsurface(pts[1].x, pts[1].y) == true && the_surface.pointinsurface(pts[2].x, pts[2].y) == true)
-            //    {
-            //        return true;
-            //    }
-            //    else
-            //    {
-            //        return false;
-            //    }
-            //}
-       
+      
             public class point_store
             {
                 int _pt_id;
