@@ -14,9 +14,6 @@ namespace constrained_delaunay_triangulation
             // Empty constructor 
         }
 
-        private int _surf_index; // remove later
-        private List<int> _inner_surf_index = new List<int>(); // remove later
-
         public void select_and_set_mesh(double x, double y, bool is_create)
         {
             // this is a call to set or delete the mesh
@@ -28,18 +25,14 @@ namespace constrained_delaunay_triangulation
                     surf_index = all_surfaces.FindIndex(obj => obj.surface_id == surf.surface_id); // add the index of the surface to the main index;
                     break;
                 }
-
             }
 
             List<int> inner_surf_index = new List<int>(); // variable to store inner surface index
-            _inner_surf_index = new List<int>();
             if (surf_index != -1) // if not equal to -1 then surface is found
             {
-                _surf_index = surf_index;
                 foreach (surface_store inner_surf in all_surfaces[surf_index].inner_surfaces)
                 {
                     inner_surf_index.Add(all_surfaces.FindIndex(obj => obj.surface_id == inner_surf.surface_id)); // add the index of inner surfaces to the list
-                    _inner_surf_index.Add(inner_surf_index[inner_surf_index.Count - 1]);
                 }
             }
             else
@@ -74,19 +67,16 @@ namespace constrained_delaunay_triangulation
 
             public List<point2d> all_points
             {
-                //set { this._all_points = value; }
                 get { return this._all_points; }
             }
 
             public List<edge2d> all_edges
             {
-                //set { this._all_edges = value; }
                 get { return this._all_edges; }
             }
 
             public List<triangle2d> all_triangles
             {
-                //set { this._all_triangles = value; }
                 get { return this._all_triangles; }
             }
 
@@ -115,7 +105,6 @@ namespace constrained_delaunay_triangulation
                 Pen temp_tri_pen = new Pen(Color.LightGreen, 1);
                 all_triangles.ForEach(obj => obj.paint_me(ref gr1, ref temp_tri_pen)); // Paint the faces
             }
-
         }
 
         public class surface_store
@@ -188,35 +177,11 @@ namespace constrained_delaunay_triangulation
                 surface_area = Math.Abs(this.signedpolygonarea());
             }
 
-            public void reverse_surface_orinetation()
-            {
-                List<edge2d> temp_edge_list = new List<edge2d>();
-
-                for (int i = this.surface_edges.Count - 1; i >= 0; i--) // reverse the list
-                {
-                    temp_edge_list.Add(new edge2d(this.surface_edges[i].edge_id, this.surface_edges[i].end_pt, this.surface_edges[i].start_pt));
-                }
-
-                // clear the edge list
-                this.surface_edges = new List<edge2d>();
-                this.surface_edges.AddRange(temp_edge_list);
-            }
-
             public void set_inner_surfaces(surface_store i_inner_surface)
             {
-                // add inner surface one after another
-                //for (int i = 0; i < i_inner_surfaces.Count; i++)
-                //{
-                if (i_inner_surface.signedpolygonarea() > 0) // check whether the inner surface is oriented clockwise (positive area = anti-clockwise)
-                {
-                    // anti-clockwise orientation detected so reverse the orientation to be clockwise
-                    i_inner_surface.reverse_surface_orinetation();
-                }
-                inner_surfaces.Add(i_inner_surface); // inner surface is clockwise
-                                                     //}
 
-                //foreach (surface_store surf in inner_surfaces) // cycle through all the inner surfaces
-                //{
+                inner_surfaces.Add(i_inner_surface);
+   
                 // Set the path of inner surface
                 List<PointF> temp_sur_pts = new List<PointF>();
                 foreach (edge2d ed in inner_surfaces[inner_surfaces.Count - 1].surface_edges)
@@ -231,8 +196,6 @@ namespace constrained_delaunay_triangulation
 
                 // set region
                 surface_region.Exclude(inner_surface); // exclude the inner surface region
-
-                //}
             }
 
             public void set_encapsulating_surface(surface_store outter_surface)
@@ -323,7 +286,6 @@ namespace constrained_delaunay_triangulation
                 {
                     return false;
                 }
-
             }
         }
 
@@ -485,27 +447,14 @@ namespace constrained_delaunay_triangulation
         {
             int _face_id;
             public point2d[] vertices { get; } = new point2d[3];
-            public point2d[] shrunk_vertices { get; } = new point2d[3];
 
             point2d _mid_pt;
-            double shrink_factor = 0.6f; //
-                                         // in Circle
-            point2d _circle_center;
-            double _circle_radius;
-            point2d _ellipse_edge;
-            double _shortest_edge;
+            double shrink_factor = 0.6f;
+
 
             public int face_id
             {
                 get { return this._face_id; }
-            }
-
-            public point2d circum_center
-            {
-                get
-                {
-                    return this._circle_center;
-                }
             }
 
             public point2d face_mid_pt
@@ -514,11 +463,6 @@ namespace constrained_delaunay_triangulation
                 {
                     return this._mid_pt;
                 }
-            }
-
-            public double circumradius_shortest_edge_ratio
-            {
-                get { return (this._circle_radius / this._shortest_edge); }
             }
 
             public PointF get_p1
@@ -565,33 +509,6 @@ namespace constrained_delaunay_triangulation
                 }
 
                 this._mid_pt = new point2d(-1, (i_p1.x + i_p2.x + i_p3.x) / 3.0f, (i_p1.y + i_p2.y + i_p3.y) / 3.0f);
-
-                set_shrunk_vertices();
-                set_incircle();
-                set_shortest_edge();
-            }
-
-            private void set_shrunk_vertices()
-            {
-                double shrink_factor = 0.98;
-                point2d pt1 = new point2d(-1, this._mid_pt.x * (1 - shrink_factor) + (this.vertices[0].x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.vertices[0].y * shrink_factor));
-                point2d pt2 = new point2d(-1, this._mid_pt.x * (1 - shrink_factor) + (this.vertices[1].x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.vertices[1].y * shrink_factor));
-                point2d pt3 = new point2d(-1, this._mid_pt.x * (1 - shrink_factor) + (this.vertices[2].x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.vertices[2].y * shrink_factor));
-
-                this.shrunk_vertices[0] = pt1;
-                this.shrunk_vertices[1] = pt2;
-                this.shrunk_vertices[2] = pt3;
-            }
-
-
-            private void set_shortest_edge()
-            {
-                double edge_len_1 = new edge2d(-1, this.vertices[0], this.vertices[1]).edge_length;
-                double edge_len_2 = new edge2d(-1, this.vertices[1], this.vertices[2]).edge_length;
-                double edge_len_3 = new edge2d(-1, this.vertices[2], this.vertices[0]).edge_length;
-
-                this._shortest_edge = edge_len_1 < edge_len_2 ? (edge_len_1 < edge_len_3 ? edge_len_1 : edge_len_3) : (edge_len_2 < edge_len_3 ? edge_len_2 : edge_len_3);
-                //x < y ? (x < z ? x : z) : (y < z ? y : z)
             }
 
             private bool IsCounterClockwise(point2d point1, point2d point2, point2d point3)
@@ -614,51 +531,6 @@ namespace constrained_delaunay_triangulation
                 return false;
             }
 
-            private void set_incircle()
-            {
-                point2d p1 = vertices[0];
-                point2d p2 = vertices[1];
-                point2d p3 = vertices[2];
-
-                double dA = (p1.x * p1.x) + (p1.y * p1.y);
-                double dB = (p2.x * p2.x) + (p2.y * p2.y);
-                double dC = (p3.x * p3.x) + (p3.y * p3.y);
-
-                double aux1 = (dA * (p3.y - p2.y) + dB * (p1.y - p3.y) + dC * (p2.y - p1.y));
-                double aux2 = -(dA * (p3.x - p2.x) + dB * (p1.x - p3.x) + dC * (p2.x - p1.x));
-                double div = (2 * (p1.x * (p3.y - p2.y) + p2.x * (p1.y - p3.y) + p3.x * (p2.y - p1.y)));
-
-                //if (div != 0)
-                //{
-
-                //}
-
-                //Circumcircle
-                double center_x = aux1 / div;
-                double center_y = aux2 / div;
-
-                this._circle_center = new point2d(-1, center_x, center_y);
-                this._circle_radius = Math.Sqrt((center_x - p1.x) * (center_x - p1.x) + (center_y - p1.y) * (center_y - p1.y));
-                //this._ellipse_edge = new point2d(-1, center_x - this._circle_radius, center_y - this._circle_radius);
-                this._ellipse_edge = new point2d(-1, center_x - 2, center_y - 2);
-            }
-
-
-
-            public bool shares_edge_with(triangle2d other)
-            {
-                int sharedVertices = vertices.Where(obj => other.vertices.Contains(obj)).Count();
-                return (sharedVertices == 2);
-            }
-
-            public bool is_point_inside_circumcircle(point2d pt)
-            {
-                double d_squared = (pt.x - circum_center.x) * (pt.x - circum_center.x) +
-                    (pt.y - circum_center.y) * (pt.y - circum_center.y);
-                return d_squared < (_circle_radius * _circle_radius);
-            }
-
-
             public void paint_me(ref Graphics gr0, ref Pen face_pen) // this function is used to paint the points
             {
                 //Pen triangle_pen = new Pen(Color.LightGreen, 1);
@@ -678,30 +550,30 @@ namespace constrained_delaunay_triangulation
                     }
                 }
 
-                if (Form1.the_static_class.is_paint_incircle == true)
-                {
-                    if (circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
-                    {
-                        gr0.DrawEllipse(new Pen(Color.Black, 2), Form1.the_static_class.to_single(this._ellipse_edge.get_point().X + 2 - this._circle_radius),
-                                                  Form1.the_static_class.to_single(this._ellipse_edge.get_point().Y + 2 - this._circle_radius),
-                                                     Form1.the_static_class.to_single(this._circle_radius * 2),
-                                                     Form1.the_static_class.to_single(this._circle_radius * 2));
-                    }
-                }
+                //if (Form1.the_static_class.is_paint_incircle == true)
+                //{
+                //    if (circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
+                //    {
+                //        gr0.DrawEllipse(new Pen(Color.Black, 2), Form1.the_static_class.to_single(this._ellipse_edge.get_point().X + 2 - this._circle_radius),
+                //                                  Form1.the_static_class.to_single(this._ellipse_edge.get_point().Y + 2 - this._circle_radius),
+                //                                     Form1.the_static_class.to_single(this._circle_radius * 2),
+                //                                     Form1.the_static_class.to_single(this._circle_radius * 2));
+                //    }
+                //}
 
             }
 
-            public void paint_circumcenter(ref Graphics gr0, ref Pen face_pen) // this function is used to paint the circumcenter
-            {
-                if (circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
-                {
-                    gr0.FillEllipse(face_pen.Brush, this._ellipse_edge.get_point().X,
-                                                 this._ellipse_edge.get_point().Y,
-                                                 Form1.the_static_class.to_single(2 * 2),
-                                                 Form1.the_static_class.to_single(2 * 2));
-                }
+            //public void paint_circumcenter(ref Graphics gr0, ref Pen face_pen) // this function is used to paint the circumcenter
+            //{
+            //    if (circumradius_shortest_edge_ratio > Form1.the_static_class.B_var)
+            //    {
+            //        gr0.FillEllipse(face_pen.Brush, this._ellipse_edge.get_point().X,
+            //                                     this._ellipse_edge.get_point().Y,
+            //                                     Form1.the_static_class.to_single(2 * 2),
+            //                                     Form1.the_static_class.to_single(2 * 2));
+            //    }
 
-            }
+            //}
 
 
         }
