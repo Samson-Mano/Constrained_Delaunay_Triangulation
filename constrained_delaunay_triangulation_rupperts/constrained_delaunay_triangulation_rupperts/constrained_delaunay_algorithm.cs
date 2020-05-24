@@ -96,24 +96,38 @@ namespace constrained_delaunay_triangulation
             main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
             // ________________________________________________________________________________________________________________________________
 
-            // step : xx Well sized triangle condition is mean d
-            List<pslg_datastructure.triangle2d> temp_sized_triangle = main_mesh.local_output_triangle.OrderBy(obj => obj.circum_radius).ToList();
-            double mean_size = temp_sized_triangle[0].circum_radius * 20;
+            // step : 5 Well sized triangle condition
+            // parameter 1 => B is the parameter from Chew's first algorithm B = 1, Ruppert's B = Sqrt(2), Chews second algorithm B = Sqrt(5)/2
+            double B_var = Math.Sqrt(2);
+            // parameter 2 => h is the desired side length of triangle in the triangulation (intiutive user input)
+            double h_var = main_mesh.all_triangles.OrderBy(obj => obj.shortest_edge).ToArray()[0].shortest_edge * 3.0f; // change this !!!! to desired size
 
+            // step : 6 Find and queue the bad triangles
+            pslg_datastructure.surface_store current_surface = the_surface_data[the_surface_index];
+            mesh_store.triangle_store bad_triangle = main_mesh.all_triangles.Find(obj => triangle_angle_size_constraint(current_surface, outter_edges, inner_edges, obj, B_var, h_var) == true);
 
-            do
+            while (bad_triangle != null)
             {
-                // step: 5 Grade the triangle with circum radius to shortest edge ratio and find the worst triangle
-                mesh_store.triangle_store worst_triangle = get_worst_triangle(main_mesh.all_triangles, the_surface_data[the_surface_index], outter_edges, inner_edges);
+                // c_vertex stores the circum_center of bad triangles
+                pslg_datastructure.point2d inner_surface_pt = new pslg_datastructure.point2d(-1, bad_triangle.circum_center.x, bad_triangle.circum_center.y);
 
-                // step : 6 Refine the mesh with circum radius to shortest edge ratio
-                // and To produce an-edge of length less than h, the radius of circumcircle must be less than h.
-                if (worst_triangle != null && (worst_triangle.circumradius_shortest_edge_ratio > Form1.the_static_class.B_var || worst_triangle.circum_radius > mean_size))
+                // step : 6A Refine the outter edges which are encroched by the failed triangles circum center
+                is_encroched = false;
+                encroched_segment_single_divide(ref outter_edges, ref inner_surface_pt, h_var, ref is_encroched, ref seed_outter_edge_exists);
+
+                if (is_encroched == true)
                 {
-                    pslg_datastructure.point2d inner_surface_pt = new pslg_datastructure.point2d(-1, worst_triangle.circum_center.x, worst_triangle.circum_center.y);
-                    // step : 6A Refine the outter edges which are encroched by the failed triangles circum center
+                    // incremental add point
+                    main_mesh.Add_single_point(inner_surface_pt);
+                    goto loopend;
+                }
+
+                // step : 6B Refine all the inner edges which are encroched by the failed triangles circum center
+                for (int j = 0; j < inner_surface_indices.Count; j++)
+                {
+                    // cycle through all the inner surfaces
                     is_encroched = false;
-                    encroched_segment_single_divide(ref outter_edges, ref inner_surface_pt, ref is_encroched, ref seed_outter_edge_exists);
+                    encroched_segment_single_divide(ref inner_edges[j], ref inner_surface_pt, h_var, ref is_encroched, ref seed_inner_edge_exists[j]);
 
                     if (is_encroched == true)
                     {
@@ -121,42 +135,19 @@ namespace constrained_delaunay_triangulation
                         main_mesh.Add_single_point(inner_surface_pt);
                         goto loopend;
                     }
-
-                    // step : 6B Refine all the inner edges which are encroched by the failed triangles circum center
-                    for (int j = 0; j < inner_surface_indices.Count; j++)
-                    {
-                        // cycle through all the inner surfaces
-                        is_encroched = false;
-                        encroched_segment_single_divide(ref inner_edges[j], ref inner_surface_pt, ref is_encroched, ref seed_inner_edge_exists[j]);
-
-                        if (is_encroched == true)
-                        {
-                            // incremental add point
-                            main_mesh.Add_single_point(inner_surface_pt);
-                            goto loopend;
-                        }
-                    }
-
-                    // Refinement operation 2 => split a triangle by adding a vertex at its circum center
-                    // step : 6C Refine all the inner surface with the failed triangles circum center
-                    main_mesh.Add_single_point(inner_surface_pt);
-
-                loopend:;
-                    // Finalize the mesh (to remove the faces out of bounds)
-                    // main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
-
-                }
-                else
-                {
-                    // Exit if no bad triangles
-                    break;
                 }
 
-            } while (true);
+                // Refinement operation 2 => split a triangle by adding a vertex at its circum center
+                // step : 6C Refine all the inner surface with the failed triangles circum center
+                main_mesh.Add_single_point(inner_surface_pt);
+
+            loopend:;
+                // Find the new bad triangle
+                bad_triangle = main_mesh.all_triangles.Find(obj => triangle_angle_size_constraint(current_surface, outter_edges, inner_edges, obj, B_var, h_var) == true);
+            }
 
             // Finalize the mesh (to remove the faces out of bounds)
             main_mesh.Finalize_mesh(the_surface_data[the_surface_index]);
-
             // ________________________________________________________________________________________________________________________________
 
             // step : 7 Add the mesh to the surface
@@ -223,15 +214,73 @@ namespace constrained_delaunay_triangulation
 
                     foreach (pslg_datastructure.point2d pt in all_nodes)
                     {
-
-
                         // (x - center_x)^2 + (y - center_y)^2 < radius^2 (then the point is inside the circle)
                         if ((Math.Pow((pt.x - cicle_center.x), 2) + Math.Pow((pt.y - cicle_center.y), 2)) < circle_radius_squared)
                         {
+                            // Point where the segement is split
+                            pslg_datastructure.point2d split_pt = new pslg_datastructure.point2d(all_nodes.Count + amend_nodes.Count, surface_edges[i].mid_pt.x, surface_edges[i].mid_pt.y);
+
+                            // Check for acute angle connected segement
+                            // This sequence is to avoid non-convergence in spliting small angled segement infinite times
+                            // Find the two segments connected to the point
+                            List<pslg_datastructure.edge2d> two_segments = surface_edges.FindAll(obj => obj.start_pt.Equals(pt) || obj.end_pt.Equals(pt));
+
+                            if (two_segments.Count != 0)
+                            {
+                                // if (two_segments.Count >2) // Some thing is terribly wrong
+                                pslg_datastructure.point2d other_pt1 = two_segments[0].start_pt.Equals(pt) == true ? two_segments[0].end_pt : two_segments[0].start_pt;
+                                pslg_datastructure.point2d other_pt2 = two_segments[two_segments.Count - 1].end_pt.Equals(pt) == true ? two_segments[two_segments.Count - 1].start_pt : two_segments[two_segments.Count - 1].end_pt;
+
+                                if (surface_edges[i].vertex_exists(other_pt1) == true || surface_edges[i].vertex_exists(other_pt2) == true)
+                                {
+
+                                    pslg_datastructure.point2d apex_pt, non_apex_vertex_seg1, non_apex_vertex_seg2;
+                                    // The edge and the point encroched shares the same vertex (call it apex vertex)
+                                    double split_length, t_param;
+                                    // I dont really understand why Ruppert & JR Shewchunk using concentric circles of radii of two squares
+                                    // By using a split lenght of smallest edge we end up with a isoceles triangle
+                                    if (surface_edges[i].vertex_exists(other_pt1) == true)
+                                    {
+                                        apex_pt = other_pt1;
+                                        // Find the other vertex of the two segments
+                                        non_apex_vertex_seg1 = surface_edges[i].start_pt.Equals(apex_pt) == true ? surface_edges[i].end_pt : surface_edges[i].start_pt;
+                                        non_apex_vertex_seg2 = two_segments[0].start_pt.Equals(apex_pt) == true ? two_segments[0].end_pt : two_segments[0].start_pt;
+                                        // edge length of the smallest segment is chosen
+                                        split_length = two_segments[0].edge_length;
+                                    }
+                                    else
+                                    {
+                                        apex_pt = other_pt2;
+                                        // Find the other vertex of the two segments
+                                        non_apex_vertex_seg1 = surface_edges[i].start_pt.Equals(apex_pt) == true ? surface_edges[i].end_pt : surface_edges[i].start_pt;
+                                        non_apex_vertex_seg2 = two_segments[0].start_pt.Equals(apex_pt) == true ? two_segments[two_segments.Count - 1].end_pt : two_segments[two_segments.Count - 1].start_pt;
+
+                                        // edge length of the smallest segment is chosen
+                                        split_length = two_segments[two_segments.Count - 1].edge_length;
+
+                                    }
+
+                                    // Check whether the angle made is less than 30 degreee
+                                    if (Form1.the_static_class.GetAngle(non_apex_vertex_seg1.x, non_apex_vertex_seg1.y, apex_pt.x, apex_pt.y, non_apex_vertex_seg2.x, non_apex_vertex_seg2.y) < 0.5236)
+                                    {
+
+                                        t_param = split_length / surface_edges[i].edge_length;
+                                        if (t_param > 0.5f)
+                                        {
+                                            double split_x = apex_pt.x * (1 - t_param) + (non_apex_vertex_seg1.x * t_param);
+                                            double split_y = apex_pt.y * (1 - t_param) + (non_apex_vertex_seg1.y * t_param);
+
+                                            split_pt = new pslg_datastructure.point2d(all_nodes.Count + amend_nodes.Count, split_x, split_y);
+                                        }
+                                    }
+
+                                }
+                            }
+
                             // create two segements from one segment by splitting at the mid point
-                            pslg_datastructure.edge2d seg_1 = new pslg_datastructure.edge2d(surface_edges[i].edge_id, surface_edges[i].start_pt, surface_edges[i].mid_pt); // create a segment 1 with start_pt to mid_pt
-                            pslg_datastructure.edge2d seg_2 = new pslg_datastructure.edge2d(surface_edges.Count, surface_edges[i].mid_pt, surface_edges[i].end_pt); // create a segment 2 with mid_pt to end_pt
-                            amend_nodes.Add(new pslg_datastructure.point2d(all_nodes.Count + amend_nodes.Count, surface_edges[i].mid_pt.x, surface_edges[i].mid_pt.y));
+                            pslg_datastructure.edge2d seg_1 = new pslg_datastructure.edge2d(surface_edges[i].edge_id, surface_edges[i].start_pt, split_pt); // create a segment 1 with start_pt to mid_pt
+                            pslg_datastructure.edge2d seg_2 = new pslg_datastructure.edge2d(surface_edges.Count, split_pt, surface_edges[i].end_pt); // create a segment 2 with mid_pt to end_pt
+                            amend_nodes.Add(new pslg_datastructure.point2d(all_nodes.Count + amend_nodes.Count, split_pt.x, split_pt.y));
 
                             surface_edges.RemoveAt(i); // remove the edge which encroches
 
@@ -248,10 +297,9 @@ namespace constrained_delaunay_triangulation
                     }
                 }
             }
-
         }
 
-        public static void encroched_segment_single_divide(ref List<pslg_datastructure.edge2d> surface_edges, ref pslg_datastructure.point2d circumcenter_pt, ref bool to_continue, ref bool seed_exists)
+        public static void encroched_segment_single_divide(ref List<pslg_datastructure.edge2d> surface_edges, ref pslg_datastructure.point2d circumcenter_pt, double meansize, ref bool to_continue, ref bool seed_exists)
         {
             if (seed_exists == false)
             {
@@ -266,6 +314,97 @@ namespace constrained_delaunay_triangulation
                     // (x - center_x)^2 + (y - center_y)^2 < radius^2 (then the point is inside the circle)
                     if ((Math.Pow((circumcenter_pt.x - cicle_center.x), 2) + Math.Pow((circumcenter_pt.y - cicle_center.y), 2)) < circle_radius_squared)
                     {
+                        // Find whether the input vertex is attached to any of the edges
+                        pslg_datastructure.point2d c_pt = circumcenter_pt;
+                        if (surface_edges.Exists(obj => obj.start_pt.Equals(c_pt) || obj.end_pt.Equals(c_pt)) == true)
+                        {
+                            // If the input vertex attached to any of the edges then find whether the encroched edge and vertex edge forms a small angle
+                            // Find the two segments connected to the point
+                            List<pslg_datastructure.edge2d> two_segments = surface_edges.FindAll(obj => obj.start_pt.Equals(c_pt) || obj.end_pt.Equals(c_pt));
+
+                            // if (two_segments.Count >2) // Some thing is terribly wrong
+                            pslg_datastructure.point2d other_pt1 = two_segments[0].start_pt.Equals(c_pt) == true ? two_segments[0].end_pt : two_segments[0].start_pt;
+                            pslg_datastructure.point2d other_pt2 = two_segments[two_segments.Count - 1].end_pt.Equals(c_pt) == true ? two_segments[two_segments.Count - 1].start_pt : two_segments[two_segments.Count - 1].end_pt;
+
+
+                            if (surface_edges[i].vertex_exists(other_pt1) == true || surface_edges[i].vertex_exists(other_pt2) == true)
+                            {
+                                // Find the apex point
+                                pslg_datastructure.point2d apex_pt, non_apex_vertex_seg1, non_apex_vertex_seg2;
+                                // The edge and the point encroched shares the same vertex (call it apex vertex)
+                                double split_length, t_param;
+                                // I dont really understand why Ruppert & JR Shewchunk using concentric circles of radii of two squares
+                                // By using a split lenght of smallest edge we end up with a isoceles triangle
+                                if (surface_edges[i].vertex_exists(other_pt1) == true)
+                                {
+                                    apex_pt = other_pt1;
+                                    // Find the other vertex of the two segments
+                                    non_apex_vertex_seg1 = surface_edges[i].start_pt.Equals(apex_pt) == true ? surface_edges[i].end_pt : surface_edges[i].start_pt;
+                                    non_apex_vertex_seg2 = two_segments[0].start_pt.Equals(apex_pt) == true ? two_segments[0].end_pt : two_segments[0].start_pt;
+                                    // edge length of the smallest segment is chosen
+                                    split_length = two_segments[0].edge_length;
+                                }
+                                else
+                                {
+                                    apex_pt = other_pt2;
+                                    // Find the other vertex of the two segments
+                                    non_apex_vertex_seg1 = surface_edges[i].start_pt.Equals(apex_pt) == true ? surface_edges[i].end_pt : surface_edges[i].start_pt;
+                                    non_apex_vertex_seg2 = two_segments[0].start_pt.Equals(apex_pt) == true ? two_segments[two_segments.Count - 1].end_pt : two_segments[two_segments.Count - 1].start_pt;
+
+                                    // edge length of the smallest segment is chosen
+                                    split_length = two_segments[two_segments.Count - 1].edge_length;
+
+                                }
+
+                                // Check whether the angle made is less than 30 degreee
+                                if (Form1.the_static_class.GetAngle(non_apex_vertex_seg1.x, non_apex_vertex_seg1.y, apex_pt.x, apex_pt.y, non_apex_vertex_seg2.x, non_apex_vertex_seg2.y) < 0.5236)
+                                {
+                                    // Yes the angle is less than 30 degree making it a small angle case
+                                    t_param = split_length / surface_edges[i].edge_length;
+                                    if (t_param > 0.5f)
+                                    {
+                                        double split_x = apex_pt.x * (1 - t_param) + (non_apex_vertex_seg1.x * t_param);
+                                        double split_y = apex_pt.y * (1 - t_param) + (non_apex_vertex_seg1.y * t_param);
+
+                                        circumcenter_pt = new pslg_datastructure.point2d(-1, split_x, split_y);
+
+                                        pslg_datastructure.edge2d tseg_1 = new pslg_datastructure.edge2d(surface_edges[i].edge_id, surface_edges[i].start_pt, circumcenter_pt); // create a segment 1 with start_pt to mid_pt
+                                        pslg_datastructure.edge2d tseg_2 = new pslg_datastructure.edge2d(surface_edges.Count, circumcenter_pt, surface_edges[i].end_pt); // create a segment 2 with mid_pt to end_pt
+
+                                        surface_edges.RemoveAt(i); // remove the edge which encroches
+
+                                        // Insert the newly created two element edge list to the main list (at the removed index)
+                                        surface_edges.Insert(i, tseg_1);
+                                        surface_edges.Insert(i + 1, tseg_2);
+                                        to_continue = true;
+
+                                        // break is very important to avoid no longer continuing the search for the pt encroching i_th index segment
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        // the ratio of length is not more than half which means the longest edge is twice the length of smallest edge
+                                        goto half_split;
+                                    }
+                                }
+                                else
+                                {
+                                    // Angle is not less than 30 degree so need to impose the split
+                                    goto half_split;
+                                }
+                            }
+                            else
+                            {
+                                // No apex point
+                                // which means no relation to the circum center point so bisect this edge into half
+                                // create two segements from one segment by splitting at the mid point
+                                goto half_split;
+
+                            }
+                        }
+
+                    half_split:;
+                        // the vertex point is actualy a circle center
                         // create two segements from one segment by splitting at the mid point
                         pslg_datastructure.edge2d seg_1 = new pslg_datastructure.edge2d(surface_edges[i].edge_id, surface_edges[i].start_pt, surface_edges[i].mid_pt); // create a segment 1 with start_pt to mid_pt
                         pslg_datastructure.edge2d seg_2 = new pslg_datastructure.edge2d(surface_edges.Count, surface_edges[i].mid_pt, surface_edges[i].end_pt); // create a segment 2 with mid_pt to end_pt
@@ -278,66 +417,90 @@ namespace constrained_delaunay_triangulation
                         surface_edges.Insert(i + 1, seg_2);
                         to_continue = true;
 
-                        break; // break is very important to avoid no longer continuing the search for the pt encroching i_th index segment
+                        // break is very important to avoid no longer continuing the search for the pt encroching i_th index segment
+                        break;
                     }
                 }
             }
         }
 
-        public static mesh_store.triangle_store get_worst_triangle(List<mesh_store.triangle_store> all_triangles, pslg_datastructure.surface_store the_surface, List<pslg_datastructure.edge2d> outter_edges, List<pslg_datastructure.edge2d>[] inner_edges)
+        public static bool triangle_angle_size_constraint(pslg_datastructure.surface_store the_surface, List<pslg_datastructure.edge2d> outter_edges, List<pslg_datastructure.edge2d>[] inner_edges, mesh_store.triangle_store graded_triangle, double B, double h)
         {
-            // get the worst triangle
-            // condition is the circume center must lies inside the surface or inside the diametrical circle
-
-            List<mesh_store.triangle_store> graded_triangle = all_triangles.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ThenBy(obj => obj.circum_radius).ToList();
-            mesh_store.triangle_store worst_triangle = null;
-
-            // step: 5B select the worst triangle by thether the triangle's circum center lies inside the surface 
-            for (int i = graded_triangle.Count - 1; i >= 0; i--)
+            if (the_surface.pointinsurface(graded_triangle.shrunk_vertices[0].x, graded_triangle.shrunk_vertices[0].y) == true &&
+                        the_surface.pointinsurface(graded_triangle.shrunk_vertices[1].x, graded_triangle.shrunk_vertices[1].y) == true &&
+                        the_surface.pointinsurface(graded_triangle.shrunk_vertices[2].x, graded_triangle.shrunk_vertices[2].y) == true)
             {
-                if (is_point_encroched(outter_edges, new pslg_datastructure.point2d(-1, graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y)) == true)
+                if (graded_triangle.circumradius_shortest_edge_ratio > B)
                 {
-                    worst_triangle = graded_triangle[i];
-                    goto loopend;
+                    // condition 1: B parameter => A triangle is well-shaped if all its angles are greater than or equal to 30 degrees
+                    /* ---------------- Small Angle Input Case ----------------------------------- Very Expensive
+                    // Test whether the small angle is due to input from user
+                    pslg_datastructure.edge2d temp_e1 = new pslg_datastructure.edge2d(-1, graded_triangle.e1.start_pt.get_parent_data_type, graded_triangle.e1.end_pt.get_parent_data_type);
+                    pslg_datastructure.edge2d temp_e2 = new pslg_datastructure.edge2d(-1, graded_triangle.e2.start_pt.get_parent_data_type, graded_triangle.e2.end_pt.get_parent_data_type);
+                    pslg_datastructure.edge2d temp_e3 = new pslg_datastructure.edge2d(-1, graded_triangle.e3.start_pt.get_parent_data_type, graded_triangle.e3.end_pt.get_parent_data_type);
+
+                    int e1_index, e2_index, e3_index;
+                    e1_index = outter_edges.FindIndex(obj => obj.Equals_without_orientation(temp_e1));
+                    e2_index = outter_edges.FindIndex(obj => obj.Equals_without_orientation(temp_e2));
+                    e3_index = outter_edges.FindIndex(obj => obj.Equals_without_orientation(temp_e3));
+
+                    if (e1_index != -1 || e2_index != -1 || e3_index != -1)
+                    {
+                        if (e1_index != -1 && e2_index != -1)
+                        {
+                            return false;
+                        }
+                        else if (e2_index != -1 && e3_index != -1)
+                        {
+                            return false;
+                        }
+                        else if (e3_index != -1 && e1_index != -1)
+                        {
+                            return false;
+                        }
+                    }
+
+                    for (int i = 0; i < inner_edges.Length - 1; i++)
+                    {
+                        e1_index = inner_edges[i].FindIndex(obj => obj.Equals_without_orientation(temp_e1));
+                        e2_index = inner_edges[i].FindIndex(obj => obj.Equals_without_orientation(temp_e2));
+                        e3_index = inner_edges[i].FindIndex(obj => obj.Equals_without_orientation(temp_e3));
+
+                        if (e1_index != -1 || e2_index != -1 || e3_index != -1)
+                        {
+                            if (e1_index != -1 && e2_index != -1)
+                            {
+                                return false;
+                            }
+                            else if (e2_index != -1 && e3_index != -1)
+                            {
+                                return false;
+                            }
+                            else if (e3_index != -1 && e1_index != -1)
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                    */
+                    return true;
                 }
-                else if (the_surface.pointinsurface(graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y) == true)
+                else if (graded_triangle.circum_radius > h && graded_triangle.shortest_edge > h)
                 {
-                    worst_triangle = graded_triangle[i];
-                    goto loopend;
+                    // condition 2: h parameter => A triangle is well-sized if it satisfies a user - supplied grading function
+                    return true;
                 }
                 else
                 {
-                    for (int j = 0; j < inner_edges.Length; j++)
-                    {
-                        if (is_point_encroched(inner_edges[j], new pslg_datastructure.point2d(-1, graded_triangle[i].circum_center.x, graded_triangle[i].circum_center.y)) == true)
-                        {
-                            worst_triangle = graded_triangle[i];
-                            goto loopend;
-                        }
-                    }
+                    // Conditions are not met
+                    return false;
                 }
             }
-        loopend:;
-            return worst_triangle;
-        }
-
-        public static bool is_point_encroched(List<pslg_datastructure.edge2d> surface_edges, pslg_datastructure.point2d circumcenter_pt)
-        {
-            for (int i = surface_edges.Count - 1; i >= 0; i--) // go reverse to avoid overflow error
+            else
             {
-                // Form a diametral circle
-                pslg_datastructure.point2d cicle_center = new pslg_datastructure.point2d(-1, surface_edges[i].mid_pt.x, surface_edges[i].mid_pt.y); // circle center
-                double circle_radius_squared = Math.Pow((surface_edges[i].edge_length * 0.5) - eps, 2);
-
-
-                // (x - center_x)^2 + (y - center_y)^2 < radius^2 (then the point is inside the circle)
-                if ((Math.Pow((circumcenter_pt.x - cicle_center.x), 2) + Math.Pow((circumcenter_pt.y - cicle_center.y), 2)) < circle_radius_squared)
-                {
-                    return true;
-                }
+                return false;
             }
 
-            return false;
         }
 
         public static void delete_constrained_mesh(int the_surface_index, List<int> inner_surface_indices, ref List<pslg_datastructure.surface_store> the_surface_data)
@@ -445,13 +608,15 @@ namespace constrained_delaunay_triangulation
             public void Add_single_point(pslg_datastructure.point2d parent_onemore_point)
             {
                 // dont call this before calling Add_multiple_points
+                point_store temp_pt = new point_store(this.all_points.Count, parent_onemore_point.x, parent_onemore_point.y, parent_onemore_point);
                 // Add the point to local list
-                this._all_points.Add(new point_store(this.all_points.Count, parent_onemore_point.x, parent_onemore_point.y, parent_onemore_point));
+                this._all_points.Add(temp_pt);
                 // Add to local point list
                 this.local_input_points.Add(this.all_points[this.all_points.Count - 1].get_parent_data_type);
 
                 // call the incremental add point
                 incremental_point_addition(this.all_points[this.all_points.Count - 1]);
+
             }
 
             private void incremental_point_addition(point_store pt)
@@ -461,65 +626,58 @@ namespace constrained_delaunay_triangulation
 
                 if (containing_triangle_index != -1)
                 {
-                    // Point is inside a triangle
-                    point_store tri_a = this.all_triangles[containing_triangle_index].pt1;
-                    point_store tri_b = this.all_triangles[containing_triangle_index].pt2;
-                    point_store tri_c = this.all_triangles[containing_triangle_index].pt3;
+                    // collect the edges of the triangle
+                    edge_store tri_edge_a = this.all_triangles[containing_triangle_index].e1;
+                    edge_store tri_edge_b = this.all_triangles[containing_triangle_index].e2;
+                    edge_store tri_edge_c = this.all_triangles[containing_triangle_index].e3;
 
                     // remove the single triangle
                     remove_triangle(containing_triangle_index);
 
                     // add the three triangles
-                    int first_triangle_id, second_triangle_id, third_triangle_id;
-
-                    first_triangle_id = add_triangle(pt, tri_a, tri_b);
-                    second_triangle_id = add_triangle(pt, tri_b, tri_c);
-                    third_triangle_id = add_triangle(pt, tri_c, tri_a);
+                    int[] triangle_id = new int[3];
+                    triangle_id = add_three_triangles(pt, tri_edge_a, tri_edge_b, tri_edge_c);
 
                     // Flip the bad triangles recursively
-                    flip_bad_edges(first_triangle_id, pt);
-                    flip_bad_edges(second_triangle_id, pt);
-                    flip_bad_edges(third_triangle_id, pt);
+                    flip_bad_edges(triangle_id[0], pt);
+                    flip_bad_edges(triangle_id[1], pt);
+                    flip_bad_edges(triangle_id[2], pt);
                 }
                 else
                 {
                     // Point lies on the edge
                     // Find the edge which is closest to the pt
-                    int the_edge_id = this.all_edges.OrderBy(obj => obj.find_closest_distance(pt)).ToArray()[0].edge_id;
-                    int the_edge_index = this.all_edges.FindIndex(obj => obj.edge_id == the_edge_id);
+                    int the_edge_id = this.all_edges.Find(obj => obj.test_point_on_line(pt)).edge_id;
 
+                    int first_tri_index = this.all_edges[the_edge_id].left_triangle.tri_id;
+                    int second_tri_index = this.all_edges[the_edge_id].right_triangle.tri_id;
 
-                    int first_tri_index = this.all_triangles.FindLastIndex(obj => obj.contains_edge(this.all_edges[the_edge_index]));
-                    int second_tri_index = this.all_triangles.FindIndex(obj => obj.contains_edge(this.all_edges[the_edge_index]));
+                    // collect the other two edges of first triangle
+                    edge_store[] first_tri_other_two_edge = new edge_store[2];
+                    first_tri_other_two_edge = this.all_triangles[first_tri_index].get_other_two_edges(this.all_edges[the_edge_id]);
 
-                    // the other point of first and second triangle sharing the common edge
-                    point_store first_tri_other_pt = this.all_triangles[first_tri_index].get_other_pt(this.all_edges[the_edge_index]);
-                    point_store second_tri_other_pt = this.all_triangles[second_tri_index].get_other_pt(this.all_edges[the_edge_index]);
-                    // start and end point of the edge
-                    point_store edge_a_pt = this.all_edges[the_edge_index].start_pt;
-                    point_store edge_b_pt = this.all_edges[the_edge_index].end_pt;
+                    // collect the other two edges of second triangle
+                    edge_store[] second_tri_other_two_edge = new edge_store[2];
+                    second_tri_other_two_edge = this.all_triangles[second_tri_index].get_other_two_edges(this.all_edges[the_edge_id]);
 
                     // Remove the common edge
-                    unique_edgeid_list.Add(this.all_edges[the_edge_index].edge_id);
-                    this._all_edges.RemoveAt(the_edge_index);
+                    unique_edgeid_list.Add(this.all_edges[the_edge_id].edge_id);
+                    // this._all_edges.RemoveAt(the_edge_index);
+                    this._all_edges[the_edge_id].remove_edge();
 
                     // remove the two triangle
                     remove_triangle(first_tri_index);
                     remove_triangle(second_tri_index);
 
-                    // add the four triangles
-                    int first_triangle_id, second_triangle_id, third_triangle_id, fourth_triangle_id;
-
-                    first_triangle_id = add_triangle(pt, edge_a_pt, first_tri_other_pt);
-                    second_triangle_id = add_triangle(pt, first_tri_other_pt, edge_b_pt);
-                    third_triangle_id = add_triangle(pt, edge_b_pt, second_tri_other_pt);
-                    fourth_triangle_id = add_triangle(pt, second_tri_other_pt, edge_a_pt);
+                    // add the three triangles
+                    int[] triangle_id = new int[4];
+                    triangle_id = add_four_triangles(pt, first_tri_other_two_edge[0], first_tri_other_two_edge[1], second_tri_other_two_edge[0], second_tri_other_two_edge[1]);
 
                     // Flip the bad triangles recursively
-                    flip_bad_edges(first_triangle_id, pt);
-                    flip_bad_edges(second_triangle_id, pt);
-                    flip_bad_edges(third_triangle_id, pt);
-                    flip_bad_edges(fourth_triangle_id, pt);
+                    flip_bad_edges(triangle_id[0], pt);
+                    flip_bad_edges(triangle_id[1], pt);
+                    flip_bad_edges(triangle_id[2], pt);
+                    flip_bad_edges(triangle_id[3], pt);
                 }
             }
 
@@ -535,15 +693,17 @@ namespace constrained_delaunay_triangulation
                 foreach (triangle_store the_tri in this.all_triangles)
                 {
                     // Check if the triangles lies inside the surface
-                    pslg_datastructure.triangle2d temp_tri = new pslg_datastructure.triangle2d(i, the_tri.pt1.get_parent_data_type, the_tri.pt2.get_parent_data_type, the_tri.pt3.get_parent_data_type);
+                  
 
-                    if (the_surface.pointinsurface(temp_tri.shrunk_vertices[0].x, temp_tri.shrunk_vertices[0].y) == false ||
-                        the_surface.pointinsurface(temp_tri.shrunk_vertices[1].x, temp_tri.shrunk_vertices[1].y) == false ||
-                        the_surface.pointinsurface(temp_tri.shrunk_vertices[2].x, temp_tri.shrunk_vertices[2].y) == false)
+                    if (the_surface.pointinsurface(the_tri.shrunk_vertices[0].x, the_tri.shrunk_vertices[0].y) == false ||
+                        the_surface.pointinsurface(the_tri.shrunk_vertices[1].x, the_tri.shrunk_vertices[1].y) == false ||
+                        the_surface.pointinsurface(the_tri.shrunk_vertices[2].x, the_tri.shrunk_vertices[2].y) == false)
                     {
                         // continue because the face is not in surface
                         continue;
                     }
+
+                    pslg_datastructure.triangle2d temp_tri = new pslg_datastructure.triangle2d(i, the_tri.pt1.get_parent_data_type, the_tri.pt2.get_parent_data_type, the_tri.pt3.get_parent_data_type);
                     local_output_triangle.Add(temp_tri);
                     i++;
                 }
@@ -565,12 +725,11 @@ namespace constrained_delaunay_triangulation
                 is_meshed = true;
             }
 
-
             private void remove_triangle(int tri_index)
             {
-                int edge_index1 = this.all_edges.FindLastIndex(obj => obj.edge_id == this.all_triangles[tri_index].e1.edge_id);
-                int edge_index2 = this.all_edges.FindLastIndex(obj => obj.edge_id == this.all_triangles[tri_index].e2.edge_id);
-                int edge_index3 = this.all_edges.FindLastIndex(obj => obj.edge_id == this.all_triangles[tri_index].e3.edge_id);
+                int edge_index1 = this.all_triangles[tri_index].e1.edge_id;
+                int edge_index2 = this.all_triangles[tri_index].e2.edge_id;
+                int edge_index3 = this.all_triangles[tri_index].e3.edge_id;
 
                 // Edge 1
                 if (edge_index1 != -1)
@@ -589,71 +748,208 @@ namespace constrained_delaunay_triangulation
                 }
 
                 unique_triangleid_list.Add(this.all_triangles[tri_index].tri_id);
-                this._all_triangles.RemoveAt(tri_index);
+                this._all_triangles[tri_index].remove_triangle();
             }
 
-            private int add_triangle(point_store p1, point_store p2, point_store p3)
+            public int[] add_three_triangles(point_store new_pt, edge_store edge_a, edge_store edge_b, edge_store edge_c)
             {
-                int edge_index1 = -1;
-                int edge_index2 = -1;
-                int edge_index3 = -1;
+                // Add three new edges from the new point
+                int[] edge_indices = new int[3];
+                // Add Edge 1
+                edge_indices[0] = add_edge(new_pt, edge_a.start_pt);
 
-                //if (p1.Equals(p2) || p2.Equals(p3) || p3.Equals(p1))
-                //{
-                //    int k = 10;
-                //    k = 100;
-                //}
+                // Add Edge 2
+                edge_indices[1] = add_edge(new_pt, edge_b.start_pt);
 
+                // Add Edge 3
+                edge_indices[2] = add_edge(new_pt, edge_c.start_pt);
+                //_________________________________________________________________________________
+
+                // Add three triangles
+                int[] output_indices = new int[3];
+                // Add First triangle
+                output_indices[0] = add_triangle(new_pt, edge_a.start_pt, edge_a.end_pt, this.all_edges[edge_indices[0]], edge_a, this.all_edges[edge_indices[1]].sym);
+
+                // Add Second triangle
+                output_indices[1] = add_triangle(new_pt, edge_b.start_pt, edge_b.end_pt, this.all_edges[edge_indices[1]], edge_b, this.all_edges[edge_indices[2]].sym);
+
+                // Add Third triangle
+                output_indices[2] = add_triangle(new_pt, edge_c.start_pt, edge_c.end_pt, this.all_edges[edge_indices[2]], edge_c, this.all_edges[edge_indices[0]].sym);
+                //_________________________________________________________________________________
+
+                // Add the triangle details to the edge
                 // Edge 1
-                edge_index1 = this.all_edges.FindLastIndex(obj => obj.Equals_without_orientation(new edge_store(-1, p1, p2)));
-                if (edge_index1 == -1)
-                {
-                    edge_index1 = this.all_edges.Count;
-                    this._all_edges.Add(new edge_store(get_unique_edge_id(), p1, p2));
-                }
-
+                this._all_edges[edge_indices[0]].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[edge_indices[0]].add_triangle(this.all_triangles[output_indices[2]]);
                 // Edge 2
-                edge_index2 = this.all_edges.FindLastIndex(obj => obj.Equals_without_orientation(new edge_store(-1, p2, p3)));
-                if (edge_index2 == -1)
-                {
-                    edge_index2 = this.all_edges.Count;
-                    this._all_edges.Add(new edge_store(get_unique_edge_id(), p2, p3));
-                }
-
+                this._all_edges[edge_indices[1]].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[edge_indices[1]].add_triangle(this.all_triangles[output_indices[1]]);
                 // Edge 3
-                edge_index3 = this.all_edges.FindLastIndex(obj => obj.Equals_without_orientation(new edge_store(-1, p3, p1)));
-                if (edge_index3 == -1)
-                {
-                    edge_index3 = this.all_edges.Count;
-                    this._all_edges.Add(new edge_store(get_unique_edge_id(), p3, p1));
-                }
+                this._all_edges[edge_indices[2]].add_triangle(this.all_triangles[output_indices[1]]);
+                this._all_edges[edge_indices[2]].add_triangle(this.all_triangles[output_indices[2]]);
 
-                // Triangle
-                this._all_triangles.Add(new triangle_store(get_unique_triangle_id(), p1, p2, p3, this.all_edges[edge_index1], this.all_edges[edge_index2], this.all_edges[edge_index3]));
+                // Edge a
+                this._all_edges[edge_a.edge_id].add_triangle(this.all_triangles[output_indices[0]]);
+                // Edge b
+                this._all_edges[edge_b.edge_id].add_triangle(this.all_triangles[output_indices[1]]);
+                // Edge c
+                this._all_edges[edge_c.edge_id].add_triangle(this.all_triangles[output_indices[2]]);
 
-                // Update the triangle details to the edge
-                this._all_edges[edge_index1].add_triangle(this.all_triangles[this.all_triangles.Count - 1]);
-                this._all_edges[edge_index2].add_triangle(this.all_triangles[this.all_triangles.Count - 1]);
-                this._all_edges[edge_index3].add_triangle(this.all_triangles[this.all_triangles.Count - 1]);
+                //_________________________________________________________________________________
 
-                return this.all_triangles[this.all_triangles.Count - 1].tri_id;
+                return output_indices;
             }
 
-            private void flip_bad_edges(int tri_id, point_store pt)
+            public int[] add_four_triangles(point_store new_pt, edge_store edge_a, edge_store edge_b, edge_store edge_c, edge_store edge_d)
             {
-                // find the triangle with input id
-                int tri_index = this.all_triangles.FindLastIndex(obj => obj.tri_id == tri_id);
-                // find the edge of this triangle whihc does not contain pt
-                int common_edge_index = this.all_edges.FindLastIndex(obj => obj.edge_id == this.all_triangles[tri_index].get_other_edge_id(pt));
+                // Add four new edges from the new point
+                int[] edge_indices = new int[4];
+                // Add Edge 1
+                edge_indices[0] = add_edge(new_pt, edge_a.start_pt);
 
-                if (common_edge_index == -1)
+                // Add Edge 2
+                edge_indices[1] = add_edge(new_pt, edge_b.start_pt);
+
+                // Add Edge 3
+                edge_indices[2] = add_edge(new_pt, edge_c.start_pt);
+
+                // Add Edge 4
+                edge_indices[3] = add_edge(new_pt, edge_d.start_pt);
+                //_________________________________________________________________________________
+
+                // Add four triangles
+                int[] output_indices = new int[4];
+                // Add First triangle
+                output_indices[0] = add_triangle(new_pt, edge_a.start_pt, edge_a.end_pt, this.all_edges[edge_indices[0]], edge_a, this.all_edges[edge_indices[1]].sym);
+
+                // Add Second triangle
+                output_indices[1] = add_triangle(new_pt, edge_b.start_pt, edge_b.end_pt, this.all_edges[edge_indices[1]], edge_b, this.all_edges[edge_indices[2]].sym);
+
+                // Add Third triangle
+                output_indices[2] = add_triangle(new_pt, edge_c.start_pt, edge_c.end_pt, this.all_edges[edge_indices[2]], edge_c, this.all_edges[edge_indices[3]].sym);
+
+                // Add Fourth triangle
+                output_indices[3] = add_triangle(new_pt, edge_d.start_pt, edge_d.end_pt, this.all_edges[edge_indices[3]], edge_d, this.all_edges[edge_indices[0]].sym);
+                //_________________________________________________________________________________
+
+                // Add the triangle details to the edge
+                // Edge 1
+                this._all_edges[edge_indices[0]].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[edge_indices[0]].add_triangle(this.all_triangles[output_indices[3]]);
+                // Edge 2
+                this._all_edges[edge_indices[1]].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[edge_indices[1]].add_triangle(this.all_triangles[output_indices[1]]);
+                // Edge 3
+                this._all_edges[edge_indices[2]].add_triangle(this.all_triangles[output_indices[1]]);
+                this._all_edges[edge_indices[2]].add_triangle(this.all_triangles[output_indices[2]]);
+                // Edge 4
+                this._all_edges[edge_indices[3]].add_triangle(this.all_triangles[output_indices[2]]);
+                this._all_edges[edge_indices[3]].add_triangle(this.all_triangles[output_indices[3]]);
+
+                // Edge a
+                this._all_edges[edge_a.edge_id].add_triangle(this.all_triangles[output_indices[0]]);
+                // Edge b
+                this._all_edges[edge_b.edge_id].add_triangle(this.all_triangles[output_indices[1]]);
+                // Edge c
+                this._all_edges[edge_c.edge_id].add_triangle(this.all_triangles[output_indices[2]]);
+                // Edge d
+                this._all_edges[edge_d.edge_id].add_triangle(this.all_triangles[output_indices[3]]);
+                //_________________________________________________________________________________
+
+                return output_indices;
+            }
+
+            public int[] add_two_triangles(point_store new_pt, edge_store tri_a_edge_0, edge_store tri_a_edge_1, edge_store tri_b_edge_0, edge_store tri_b_edge_1)
+            {
+                // add the only new common edge
+                int edge_index;
+                // Add Edge 
+                edge_index = add_edge(tri_a_edge_1.start_pt, tri_b_edge_1.start_pt);
+                //_________________________________________________________________________________
+
+                // Add two triangles
+                int[] output_indices = new int[2];
+                // Add First triangle
+                output_indices[0] = add_triangle(tri_a_edge_1.start_pt, tri_b_edge_0.start_pt, this.all_edges[edge_index].sym.start_pt, tri_a_edge_1, tri_b_edge_0, this.all_edges[edge_index].sym);
+
+                // Add Second triangle
+                output_indices[1] = add_triangle(tri_b_edge_1.start_pt, tri_a_edge_0.start_pt, this.all_edges[edge_index].start_pt, tri_b_edge_1, tri_a_edge_0, this.all_edges[edge_index]);
+                //_________________________________________________________________________________
+
+                // Add the triangle details to the edge
+                // Common Edge
+                this._all_edges[edge_index].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[edge_index].add_triangle(this.all_triangles[output_indices[1]]);
+
+                // Edge a
+                this._all_edges[tri_a_edge_1.edge_id].add_triangle(this.all_triangles[output_indices[0]]);
+                this._all_edges[tri_b_edge_0.edge_id].add_triangle(this.all_triangles[output_indices[0]]);
+                // Edge b
+                this._all_edges[tri_b_edge_1.edge_id].add_triangle(this.all_triangles[output_indices[1]]);
+                this._all_edges[tri_a_edge_0.edge_id].add_triangle(this.all_triangles[output_indices[1]]);
+                //_________________________________________________________________________________
+
+                return output_indices;
+            }
+
+            private int add_edge(point_store pt1, point_store pt2)
+            {
+                // Add Edge
+                int edge_index = get_unique_edge_id();
+                if (edge_index > this.all_edges.Count - 1)
                 {
-                    return;
+                    // new edge is added
+                    edge_store temp_edge = new edge_store();
+                    temp_edge.add_edge(edge_index, pt1, pt2);
+                    this._all_edges.Add(temp_edge);
                 }
+                else
+                {
+                    // existing edge is revised (previously deleted edge is now filled)
+                    this._all_edges[edge_index].add_edge(edge_index, pt1, pt2);
+                }
+                return edge_index;
+            }
 
-                // main method to legalize edges by recursively flipping all the illegal edges
-                int neighbour_tri_index = this.all_triangles.FindIndex(obj => obj.tri_id == this.all_edges[common_edge_index].other_triangle_id(this.all_triangles[tri_index]));
-                //  int neighbour_tri_index = common_edge_index != -1 ? this.all_triangles.FindIndex(obj => obj.tri_id == this.all_edges[common_edge_index].other_triangle_id(this.all_triangles[tri_index])) : -1;
+            private int add_triangle(point_store pt1, point_store pt2, point_store pt3, edge_store e1, edge_store e2, edge_store e3)
+            {
+                // Add Triangle
+                int tri_index = get_unique_triangle_id();
+                if (tri_index > this.all_triangles.Count - 1)
+                {
+                    // new triangle is added
+                    triangle_store temp_tri = new triangle_store();
+                    temp_tri.add_triangle(tri_index, pt1, pt2, pt3, e1, e2, e3);
+                    this._all_triangles.Add(temp_tri);
+                }
+                else
+                {
+                    // existing triangle is revised (previously deleted triangle is now filled)
+                    this._all_triangles[tri_index].add_triangle(tri_index, pt1, pt2, pt3, e1, e2, e3);
+                }
+                return tri_index;
+            }
+
+            private void flip_bad_edges(int tri_index, point_store pt)
+            {
+                //flip recursively for the new pair of triangles
+                //
+                //           pl                    pl
+                //          /||\                  /  \
+                //       al/ || \bl            al/    \bl
+                //        /  ||  \              /      \
+                //       /  a||b  \    flip    /___a____\
+                //     p0\   ||   /pt   =>   p0\---b----/pt
+                //        \  ||  /              \      /
+                //       ar\ || /br            ar\    /br
+                //          \||/                  \  /
+                //           p2                    p2
+                //
+                // find the edge of this triangle whihc does not contain pt
+                int common_edge_index = this.all_triangles[tri_index].get_other_edge_id(pt);
+
+                // Find the neighbour tri index
+                int neighbour_tri_index = this.all_edges[common_edge_index].other_triangle_id(this.all_triangles[tri_index]);
 
                 // legalize only if the triangle has a neighbour
                 if (neighbour_tri_index != -1)
@@ -661,28 +957,30 @@ namespace constrained_delaunay_triangulation
                     // check whether the newly added pt is inside the neighbour triangle
                     if (this.all_triangles[neighbour_tri_index].is_point_in_circumcircle(pt) == true)
                     {
-                        // find the other vertex of the closest triangle
-                        point_store neighbour_tri_other_vertex = this.all_triangles[neighbour_tri_index].get_other_pt(this.all_edges[common_edge_index]);
-                        point_store edge_a_pt = this.all_edges[common_edge_index].start_pt;
-                        point_store edge_b_pt = this.all_edges[common_edge_index].end_pt;
+                        // collect the other two edges of the triangle
+                        edge_store[] tri_other_two_edges = new edge_store[2];
+                        tri_other_two_edges = this.all_triangles[tri_index].get_other_two_edges(this.all_edges[common_edge_index]);
+
+                        // collect the other two edges of the neighbour triangle
+                        edge_store[] neighbour_tri_other_two_edges = new edge_store[2];
+                        neighbour_tri_other_two_edges = this.all_triangles[neighbour_tri_index].get_other_two_edges(this.all_edges[common_edge_index]);
 
                         // Remove the common edge
                         unique_edgeid_list.Add(this.all_edges[common_edge_index].edge_id);
-                        this._all_edges.RemoveAt(common_edge_index);
+                        // this._all_edges.RemoveAt(common_edge_index);
+                        this._all_edges[common_edge_index].remove_edge();
 
                         // Remove the two triangles
                         remove_triangle(tri_index);
                         remove_triangle(neighbour_tri_index);
 
-                        // Add two triangles
-                        int first_triangle_id, second_triangle_id;
-
-                        first_triangle_id = add_triangle(pt, neighbour_tri_other_vertex, edge_a_pt);
-                        second_triangle_id = add_triangle(pt, neighbour_tri_other_vertex, edge_b_pt);
+                        // Add new two triangles
+                        int[] triangle_id = new int[2];
+                        triangle_id = add_two_triangles(pt, tri_other_two_edges[0], tri_other_two_edges[1], neighbour_tri_other_two_edges[0], neighbour_tri_other_two_edges[1]);
 
                         // recursion below
-                        flip_bad_edges(first_triangle_id, pt);
-                        flip_bad_edges(second_triangle_id, pt);
+                        flip_bad_edges(triangle_id[0], pt);
+                        flip_bad_edges(triangle_id[1], pt);
                     }
                 }
             }
@@ -739,16 +1037,79 @@ namespace constrained_delaunay_triangulation
                 // id for the super triangle points
                 int pt_count = all_input_vertices.Count;
 
-
                 // set the vertex
-                this.s_p1 = new point_store(pt_count + 1, 0, Math.Round(k / 2.0f), new pslg_datastructure.point2d(pt_count + 1, x_zero, k));
+                this.s_p1 = new point_store(pt_count + 1, 0, Math.Round(k / 2.0f), new pslg_datastructure.point2d(pt_count + 1, x_zero, -k));
                 this.s_p2 = new point_store(pt_count + 2, Math.Round(k / 2.0f), 0.0, new pslg_datastructure.point2d(pt_count + 2, k, y_zero));
-                this.s_p3 = new point_store(pt_count + 3, -1 * Math.Round(k / 2.0f), -1 * Math.Round(k / 2.0f), new pslg_datastructure.point2d(pt_count + 3, -k, -k));
+                this.s_p3 = new point_store(pt_count + 3, -1 * Math.Round(k / 2.0f), -1 * Math.Round(k / 2.0f), new pslg_datastructure.point2d(pt_count + 3, -k, k));
 
-                // set the edges
-                add_triangle(this.s_p1, this.s_p2, this.s_p3);
+                // Add three new edges for the triangle from the three new point
+                int[] edge_indices = new int[3];
+                // Add Edge 1
+                edge_indices[0] = add_edge(this.s_p1, this.s_p2);
+
+                // Add Edge 2
+                edge_indices[1] = add_edge(this.s_p2, this.s_p3);
+
+                // Add Edge 3
+                edge_indices[2] = add_edge(this.s_p3, this.s_p1);
+                //_________________________________________________________________________________
+
+                // Create the super triangle
+                int sup_tri_index;
+                sup_tri_index = add_triangle(this.s_p1, this.s_p2, this.s_p3, this.all_edges[edge_indices[0]], this.all_edges[edge_indices[1]], this.all_edges[edge_indices[2]]);
+
+                // Add the triangle details to the outter edges
+                // Edge 1
+                this.all_edges[edge_indices[0]].add_triangle(this.all_triangles[sup_tri_index]);
+                // Edge 2
+                this.all_edges[edge_indices[1]].add_triangle(this.all_triangles[sup_tri_index]);
+                // Edge 3
+                this.all_edges[edge_indices[2]].add_triangle(this.all_triangles[sup_tri_index]);
+
+                // Super triangle creation complete
+                //_________________________________________________________________________________
             }
 
+            //public List<triangle_store> get_graded_triangles(pslg_datastructure.surface_store the_surface)
+            //{
+            //    List<triangle_store> graded_triangles = new List<triangle_store>();
+
+            //    foreach (triangle_store tri in all_triangles)
+            //    {
+            //        if (tri.contains_point(s_p1) == false && tri.contains_point(s_p2) == false && tri.contains_point(s_p3) == false)
+            //        {
+            //            if (is_triangle_in_surface(tri, the_surface) == true)
+            //            {
+            //                graded_triangles.Add(tri);
+            //            }
+            //        }
+            //    }
+
+            //    // Order the triangles
+            //    graded_triangles = graded_triangles.OrderBy(obj => obj.circumradius_shortest_edge_ratio).ToList();
+
+            //    return graded_triangles;
+            //}
+
+            //private bool is_triangle_in_surface(triangle_store tri, pslg_datastructure.surface_store the_surface)
+            //{
+            //    double shrink_factor = 0.98;
+            //    point_store[] pts = new point_store[3];
+
+            //    pts[0] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt1.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt1.y * shrink_factor), null);
+            //    pts[1] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt2.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt2.y * shrink_factor), null);
+            //    pts[2] = new point_store(-1, tri.mid_pt.x * (1 - shrink_factor) + (tri.pt3.x * shrink_factor), tri.mid_pt.y * (1 - shrink_factor) + (tri.pt3.y * shrink_factor), null);
+
+            //    if (the_surface.pointinsurface(pts[0].x, pts[0].y) == true && the_surface.pointinsurface(pts[1].x, pts[1].y) == true && the_surface.pointinsurface(pts[2].x, pts[2].y) == true)
+            //    {
+            //        return true;
+            //    }
+            //    else
+            //    {
+            //        return false;
+            //    }
+            //}
+       
             public class point_store
             {
                 int _pt_id;
@@ -838,6 +1199,7 @@ namespace constrained_delaunay_triangulation
                 point_store _end_pt;
                 triangle_store _left_triangle;
                 triangle_store _right_triangle;
+                edge_store _sym;
 
                 public int edge_id
                 {
@@ -856,7 +1218,17 @@ namespace constrained_delaunay_triangulation
 
                 public edge_store sym
                 {
-                    get { return new edge_store(this._edge_id, this._end_pt, this._start_pt); }
+                    get { return this._sym; }
+                }
+
+                public triangle_store left_triangle
+                {
+                    get { return this._left_triangle; }
+                }
+
+                public triangle_store right_triangle
+                {
+                    get { return this._right_triangle; }
                 }
 
                 public double edge_length
@@ -864,9 +1236,13 @@ namespace constrained_delaunay_triangulation
                     get { return Math.Sqrt(Math.Pow(this._start_pt.x - this._end_pt.x, 2) + Math.Pow(this._start_pt.y - this._end_pt.y, 2)); }
                 }
 
-                public edge_store(int i_edge_id, point_store i_start_pt, point_store i_end_pt)
+                public edge_store()
                 {
-                    // Constructor
+                    // Empty Constructor
+                }
+
+                public void add_edge(int i_edge_id, point_store i_start_pt, point_store i_end_pt)
+                {
                     // set id
                     this._edge_id = i_edge_id;
                     // set start and end pt
@@ -876,85 +1252,117 @@ namespace constrained_delaunay_triangulation
                     // set triangles to null
                     this._left_triangle = null;
                     this._right_triangle = null;
+                    //______________________________________________________________
+
+                    // Set the symmetrical edge
+                    // set id
+                    this._sym = new edge_store();
+                    this._sym._edge_id = i_edge_id;
+                    // set end and start pt
+                    this._sym._start_pt = i_end_pt;
+                    this._sym._end_pt = i_start_pt;
+
+                    // set triangles to null
+                    this._sym._left_triangle = null;
+                    this._sym._right_triangle = null;
+                    this._sym._sym = this;
                 }
 
-                public bool contains_point(point_store the_point)
+                public void remove_edge()
                 {
-                    // find whether the point belongs to the triangle
-                    if (the_point.Equals(this._start_pt) == true ||
-                        the_point.Equals(this._end_pt) == true)
-                    {
-                        return true;
-                    }
-                    return false;
+                    // set id
+                    this._edge_id = -1;
+                    // remove start and end pt
+                    this._start_pt = null;
+                    this._end_pt = null;
+
+                    // remove triangles to null
+                    this._left_triangle = null;
+                    this._right_triangle = null;
+                    //______________________________________________________________
+
+                    // Remove the symmetrical edge
+                    // set id
+                    this._sym._edge_id = -1;
+                    // remove end and start pt
+                    this._sym._start_pt = null;
+                    this._sym._end_pt = null;
+
+                    // remove triangles to null
+                    this._sym._left_triangle = null;
+                    this._sym._right_triangle = null;
                 }
 
                 public int other_triangle_id(triangle_store the_triangle)
                 {
-                    // Function to return the other triangle associated with this edge
-                    if (this._left_triangle != null)
+                    if (the_triangle.tri_id != -1)
                     {
-                        if (the_triangle.Equals(this._left_triangle) == true)
+                        // Function to return the other triangle associated with this edge
+                        if (this._left_triangle != null)
                         {
-                            if (this._right_triangle == null)
+                            if (the_triangle.Equals(this._left_triangle) == true)
                             {
-                                return -1;
+                                if (this._right_triangle == null)
+                                {
+                                    return -1;
+                                }
+                                return this._right_triangle.tri_id;
                             }
-                            return this._right_triangle.tri_id;
+                        }
+
+                        if (this._right_triangle != null)
+                        {
+                            if (the_triangle.Equals(this._right_triangle) == true)
+                            {
+                                if (this._left_triangle == null)
+                                {
+                                    return -1;
+                                }
+                                return this._left_triangle.tri_id;
+                            }
                         }
                     }
-
-                    if (this._right_triangle != null)
-                    {
-                        if (the_triangle.Equals(this._right_triangle) == true)
-                        {
-                            if (this._left_triangle == null)
-                            {
-                                return -1;
-                            }
-                            return this._left_triangle.tri_id;
-                        }
-                    }
-
                     return -1;
-
                 }
 
                 public void add_triangle(triangle_store the_triangle)
                 {
                     // check whether the input triangle has this edge
-                    if (the_triangle.contains_edge(this) == true)
+                    //if (the_triangle.contains_edge(this) == true)
+                    //{
+                    if (rightof(the_triangle.mid_pt, this) == true)
                     {
-                        if (rightof(the_triangle.mid_pt, this) == true)
-                        {
-                            // Add the right triangle
-                            this._right_triangle = the_triangle;
-                        }
-                        else
-                        {
-                            // Add the left triangle
-                            this._left_triangle = the_triangle;
-                        }
+                        // Add the right triangle
+                        this._right_triangle = the_triangle;
+                        this._sym._left_triangle = the_triangle;
                     }
+                    else
+                    {
+                        // Add the left triangle
+                        this._left_triangle = the_triangle;
+                        this._sym._right_triangle = the_triangle;
+                    }
+                    //}
                 }
 
                 public void remove_triangle(triangle_store the_triangle)
                 {
                     // check whether the input triangle has this edge
-                    if (the_triangle.contains_edge(this) == true)
+                    //if (the_triangle.contains_edge(this) == true)
+                    //{
+                    if (rightof(the_triangle.mid_pt, this) == true)
                     {
-                        if (rightof(the_triangle.mid_pt, this) == true)
-                        {
-                            // Remove the right triangle
-                            this._right_triangle = null;
-                        }
-                        else
-                        {
-                            // Remove the left triangle
-                            this._left_triangle = null;
-                        }
+                        // Remove the right triangle
+                        this._right_triangle = null;
+                        this._sym._left_triangle = null;
                     }
-
+                    else
+                    {
+                        // Remove the left triangle
+                        this._left_triangle = null;
+                        this._sym._right_triangle = null;
+                    }
+                    //}
                 }
 
                 private bool ccw(point_store a, point_store b, point_store c)
@@ -981,36 +1389,48 @@ namespace constrained_delaunay_triangulation
 
                 public bool Equals_without_orientation(edge_store other)
                 {
-                    if ((other.Equals(this) == true) || (other.Equals(this.sym) == true))
+                    if (this.edge_id != -1)
                     {
-                        return true;
+                        if ((other.Equals(this) == true) || (other.Equals(this.sym) == true))
+                        {
+                            return true;
+                        }
                     }
                     return false;
                 }
 
-                public double find_closest_distance(point_store pt)
+
+                public bool test_point_on_line(point_store pt)
                 {
-                    point_store ab = end_pt.sub(start_pt); // ab_x = x2 - x1,  ab_y = y2 - y1  (end_pt - start_pt)
-                    double ab_dot = ab.dot(ab); // ab_x*ab_x + ab_y*ab_y
+                    bool rslt = false;
+                    // Step: 1 Find the cross product
+                    double dxc, dyc; // Vector 1 Between given point and first point of the line
+                    dxc = pt.x - start_pt.x;
+                    dyc = pt.y - start_pt.y;
 
-                    // double u=((x3 - x1) * px + (y3 - y1) * py) / ((px*px)+(py*py));
-                    double u = (pt.sub(start_pt)).dot(ab) / ab_dot;
+                    double Threshold = edge_length * 0.01;
 
-                    if (u < 0.0)
+                    double dx1, dy1; // Vector 2 Between the second and first point of the line
+                    dx1 = end_pt.x - start_pt.x;
+                    dy1 = end_pt.y - start_pt.y;
+
+                    double crossprd;
+                    crossprd = (dxc * dy1) - (dyc * dx1); // Vector cross product
+
+                    if (Math.Abs(crossprd) <= Threshold) // Check whether the cross product is within the threshold (other wise Not on the line)
                     {
-                        u = 0.0;
+                        if (Math.Abs(dx1) >= Math.Abs(dy1)) // The line is more horizontal or <= 45 degrees
+                        {
+                            rslt = (dx1 > 0 ? (start_pt.x < pt.x && pt.x < end_pt.x ? true : false) :
+                                              (end_pt.x < pt.x && pt.x < start_pt.x ? true : false));
+                        }
+                        else // line is more vertical
+                        {
+                            rslt = (dy1 > 0 ? (start_pt.y < pt.y && pt.y < end_pt.y ? true : false) :
+                                                (end_pt.y < pt.y && pt.y < start_pt.y ? true : false));
+                        }
                     }
-                    else if (u > 1.0)
-                    {
-                        u = 1.0;
-                    }
-
-                    // closest point on the edge from the input pt
-                    point_store c = start_pt.add(ab.mult(u));
-                    // vector connecting the input pt and the pt on line
-                    point_store pt_to_c = c.sub(pt);
-
-                    return (pt_to_c.dot(pt_to_c));
+                    return rslt;
                 }
 
                 public point_store find_common_pt(edge_store other_edge)
@@ -1065,6 +1485,7 @@ namespace constrained_delaunay_triangulation
                 point_store _circum_center;
                 double _circum_circle_radius;
                 double _shortest_edge;
+                public point_store[] shrunk_vertices { get; } = new point_store[3];
 
                 public int tri_id
                 {
@@ -1112,19 +1533,28 @@ namespace constrained_delaunay_triangulation
                     get { return this._circum_center; }
                 }
 
-                public double circum_radius
-                {
-                    get { return this._circum_circle_radius; }
-                }
-
                 public double circumradius_shortest_edge_ratio
                 {
                     get { return (this._circum_circle_radius / this._shortest_edge); }
                 }
 
-                public triangle_store(int i_tri_id, point_store i_p1, point_store i_p2, point_store i_p3, edge_store i_e1, edge_store i_e2, edge_store i_e3)
+                public double circum_radius
                 {
-                    // Constructor
+                    get { return this._circum_circle_radius; }
+                }
+
+                public double shortest_edge
+                {
+                    get { return this._shortest_edge; }
+                }
+
+                public triangle_store()
+                {
+                    // Empty Constructor
+                }
+
+                public void add_triangle(int i_tri_id, point_store i_p1, point_store i_p2, point_store i_p3, edge_store i_e1, edge_store i_e2, edge_store i_e3)
+                {
                     // set id
                     this._tri_id = i_tri_id;
                     // set points
@@ -1140,6 +1570,47 @@ namespace constrained_delaunay_triangulation
 
                     set_incircle();
                     set_shortest_edge();
+                    set_shrunk_vertices();
+                }
+
+                public void remove_triangle()
+                {
+                    // set id
+                    this._tri_id = -1;
+                    // set points
+                    this._pt1 = null;
+                    this._pt2 = null;
+                    this._pt3 = null;
+                    // set edges
+                    this._e1 = null;
+                    this._e2 = null;
+                    this._e3 = null;
+                    // set the mid point
+                    this._mid_pt = null;
+
+                    // in center
+                    this._circum_center = null;
+                    this._circum_circle_radius = 0.0f;
+
+                    // shortest edge
+                    this._shortest_edge = 0.0f;
+
+                    //remove shrunk vertices
+                    this.shrunk_vertices[0] = null;
+                    this.shrunk_vertices[1] = null;
+                    this.shrunk_vertices[2] = null;
+                }
+
+                private void set_shrunk_vertices()
+                {
+                    double shrink_factor = 0.98;
+                    point_store pt1 = new point_store(-1, this._mid_pt.x * (1 - shrink_factor) + (this.pt1.x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.pt1.y * shrink_factor), null);
+                    point_store pt2 = new point_store(-1, this._mid_pt.x * (1 - shrink_factor) + (this.pt2.x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.pt2.y * shrink_factor), null);
+                    point_store pt3 = new point_store(-1, this._mid_pt.x * (1 - shrink_factor) + (this.pt3.x * shrink_factor), this._mid_pt.y * (1 - shrink_factor) + (this.pt3.y * shrink_factor), null);
+
+                    this.shrunk_vertices[0] = pt1;
+                    this.shrunk_vertices[1] = pt2;
+                    this.shrunk_vertices[2] = pt3;
                 }
 
                 private void set_incircle()
@@ -1202,6 +1673,31 @@ namespace constrained_delaunay_triangulation
                     return null;
                 }
 
+                public edge_store[] get_other_two_edges(edge_store the_edge)
+                {
+                    edge_store[] other_two_edge = new edge_store[2];
+
+                    if (this.e1.Equals_without_orientation(the_edge) == true)
+                    {
+                        other_two_edge[0] = this.e2;
+                        other_two_edge[1] = this.e3;
+                        return other_two_edge;
+                    }
+                    else if (this.e2.Equals_without_orientation(the_edge) == true)
+                    {
+                        other_two_edge[0] = this.e3;
+                        other_two_edge[1] = this.e1;
+                        return other_two_edge;
+                    }
+                    else if (this.e3.Equals_without_orientation(the_edge) == true)
+                    {
+                        other_two_edge[0] = this.e1;
+                        other_two_edge[1] = this.e2;
+                        return other_two_edge;
+                    }
+                    return null;
+                }
+
                 public int get_other_edge_id(point_store pt)
                 {
                     if (this.e1.start_pt.Equals(pt) == false && this.e1.end_pt.Equals(pt) == false)
@@ -1220,7 +1716,6 @@ namespace constrained_delaunay_triangulation
                     return -1;
                 }
 
-
                 public bool contains_edge(edge_store the_edge)
                 {
                     // find whether the edge belongs to the triangle
@@ -1232,7 +1727,6 @@ namespace constrained_delaunay_triangulation
                     }
                     return false;
                 }
-
 
                 // Tests if a 2D point lies inside this 2D triangle.See Real-Time Collision
                 // Detection, chap. 5, p. 206.
@@ -1252,7 +1746,27 @@ namespace constrained_delaunay_triangulation
 
                     double pca = the_pt.sub(this.pt3).cross(this.pt1.sub(this.pt3));
 
-                    return has_same_sign(pab, pca);
+                    if (has_same_sign(pab, pca) == false)
+                    {
+                        return false;
+                    }
+
+
+                    // Point test
+                    if (e1.test_point_on_line(the_pt) == true)
+                    {
+                        return false;
+                    }
+                    else if (e2.test_point_on_line(the_pt) == true)
+                    {
+                        return false;
+                    }
+                    else if (e3.test_point_on_line(the_pt) == true)
+                    {
+                        return false;
+                    }
+
+                    return true;
                 }
 
                 private bool has_same_sign(double a, double b)
@@ -1268,7 +1782,6 @@ namespace constrained_delaunay_triangulation
                 //// When det = 0, the four points are cocircular.If the triangle is oriented
                 //// clockwise (CW) the result is reversed.See Real-Time Collision Detection,
                 //// chap. 3, p. 34.
-
                 public bool is_point_in_circumcircle(point_store the_pt)
                 {
                     double a11 = pt1.x - the_pt.x;
@@ -1308,7 +1821,6 @@ namespace constrained_delaunay_triangulation
                     return det > 0.0;
                 }
 
-
                 public bool Equals(triangle_store the_triangle)
                 {
                     // find the triangle equals
@@ -1320,9 +1832,7 @@ namespace constrained_delaunay_triangulation
                     }
                     return false;
                 }
-
             }
-
         }
         #endregion
     }
