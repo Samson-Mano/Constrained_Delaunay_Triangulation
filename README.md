@@ -6,6 +6,7 @@ Example: 1
 ![](/constrained_delaunay_triangulation_rupperts/images/constrained_delaunay_triangulation_gif_4.gif)<br /><br />
 Example: 2
 ![](/constrained_delaunay_triangulation_rupperts/images/constrained_delaunay_triangulation_gif_2.gif)<br /><br />
+![](/constrained_delaunay_triangulation_rupperts/images/example_implemented1.png)<br /><br />
 ![](/constrained_delaunay_triangulation_rupperts/images/constrained_delaunay_3.png)<br /><br />
 ![](/constrained_delaunay_triangulation_rupperts/images/constrained_delaunay_4.png)<br /><br />
 
