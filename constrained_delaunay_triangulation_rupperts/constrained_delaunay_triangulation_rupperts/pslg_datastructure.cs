@@ -177,6 +177,20 @@ namespace constrained_delaunay_triangulation
                 surface_area = Math.Abs(this.signedpolygonarea());
             }
 
+            public void reverse_surface_orinetation()
+            {
+                List<edge2d> temp_edge_list = new List<edge2d>();
+
+                for (int i = this.surface_edges.Count - 1; i >= 0; i--) // reverse the list
+                {
+                    temp_edge_list.Add(new edge2d(this.surface_edges[i].edge_id, this.surface_edges[i].end_pt, this.surface_edges[i].start_pt));
+                }
+
+                // clear the edge list
+                this.surface_edges = new List<edge2d>();
+                this.surface_edges.AddRange(temp_edge_list);
+            }
+
             public void set_inner_surfaces(surface_store i_inner_surface)
             {
 

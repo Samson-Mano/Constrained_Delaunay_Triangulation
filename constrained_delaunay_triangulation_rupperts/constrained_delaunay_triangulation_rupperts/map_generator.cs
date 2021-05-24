@@ -125,11 +125,11 @@ namespace constrained_delaunay_triangulation
                     // check the surface orientation
                     pslg_datastructure.surface_store t_surf = new pslg_datastructure.surface_store(temp_surfaces.Count,surf_points, surf_edges, temp_surfaces.Count);
 
-                    if (t_surf.signedpolygonarea() < 0)// check whether the outter surface is oriented anti clockwise (negative area = clockwise)
-                    {
-                        // clockwise orientation detected so reverse the orientation to be anti-clockwise
-                        t_surf.reverse_surface_orinetation();
-                    }
+                    //if (t_surf.signedpolygonarea() < 0)// check whether the outter surface is oriented anti clockwise (negative area = clockwise)
+                    //{
+                    //    // clockwise orientation detected so reverse the orientation to be anti-clockwise
+                    //    t_surf.reverse_surface_orinetation();
+                    //}
 
                     temp_surfaces.Add(t_surf);
                     //System.Threading.Thread.Sleep(200);
@@ -179,8 +179,6 @@ namespace constrained_delaunay_triangulation
             set_surfaces = new List<pslg_datastructure.surface_store>();
             set_surfaces.AddRange(temp_surfaces);
         }
-
-
 
         public class square_grid
         {
@@ -570,8 +568,6 @@ namespace constrained_delaunay_triangulation
             }
         }
 
-
-
         public class map_square
         {
             public control_node topleft, topright, bottomright, bottomleft;
@@ -706,8 +702,6 @@ namespace constrained_delaunay_triangulation
                 right = new map_node((x + (square_size / 2.0f)), y); // right node
             }
         }
-
-
 
         public map_generator(float i_width, float i_height)
         {
