@@ -1,3 +1,13 @@
+Please use 2D Triangle generator repository below
+
+https://github.com/Samson-Mano/2DTriangle_Mesh_Generator
+
+The Constrained Delaunay Triangulation (CDT) algorithm, available at the link below, has been tested for a wide range of cases and has been found to be robust and applicable in many scenarios. 2D triangle mesh generator is one implementation that uses this algorithm.
+
+https://github.com/Samson-Mano/2DTriangle_Mesh_Generator/tree/master/2DTriangle_Mesh_Generator/mesh_control/delaunay_triangulation
+
+Please note that this repository has been superseded by newer versions of the code (link above), and we encourage you to use those instead. However, this repository is still available for reference and can be used if needed.
+
 # Constrained Delaunay Triangulation
 This is a C# implementation of Constrained Delaunay triangulation. The implementation follows Ruppert’s Algorithm. Bowyer Watson incremental algorithm is used in this implementation<br /><br />The explaination of algorithm is shown in<br /> https://sites.google.com/site/samsoninfinite/multivariable-calculus/constrained-delaunay-triangulation <br /><br />
 Maple Leaf
